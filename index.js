@@ -36,6 +36,7 @@ login({ appState }, loginOptions, (err, api) => {
 
         const msg = event.body.toLowerCase();
         const sender = event.senderID;
+        api.sendMessage(`🆔 ID của bạn là: ${sender}`, thread);
         const thread = event.threadID;
 
         // ====== LỆNH PING (ai cũng dùng được) ======

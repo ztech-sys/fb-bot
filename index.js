@@ -18,24 +18,6 @@ const loginOptions = {
     simulateTyping: true
 };
 
-function isAdmin(api, threadID, userID) {
-    return new Promise((resolve) => {
-        api.getThreadInfo(threadID, (err, info) => {
-            if (err) {
-                console.error("❌ Lỗi getThreadInfo:", err);
-                resolve(false);
-                return;
-            }
-            if (!info.adminIDs || info.adminIDs.length === 0) {
-                resolve(false);
-                return;
-            }
-            const adminIDs = info.adminIDs.map(id => id.toString());
-            resolve(adminIDs.includes(userID.toString()));
-        });
-    });
-}
-
 login({ appState }, loginOptions, (err, api) => {
     if (err) {
         console.error("❌ Lỗi đăng nhập:", err);
@@ -43,6 +25,9 @@ login({ appState }, loginOptions, (err, api) => {
     }
 
     console.log("✅ Đăng nhập thành công! User ID:", api.getCurrentUserID());
+
+    // ====== DANH SÁCH ADMIN BOT (HARDCODE) ======
+    const BOT_ADMINS = ["61590576006177"]; // Thay ID của mày vào đây
 
     api.listenMqtt(async (err, event) => {
         if (err) return console.error("❌ Lỗi lắng nghe:", err);
@@ -53,12 +38,13 @@ login({ appState }, loginOptions, (err, api) => {
         const sender = event.senderID;
         const thread = event.threadID;
 
-        // ====== LỆNH KHÔNG CẦN ADMIN ======
+        // ====== LỆNH PING (ai cũng dùng được) ======
         if (msg === "/ping") {
             api.sendMessage("🏓 pong!", thread);
             return;
         }
 
+        // ====== HELP (ai cũng dùng được) ======
         if (msg === "/help") {
             api.sendMessage(
                 "📋 DANH SÁCH LỆNH:\n" +
@@ -76,17 +62,16 @@ login({ appState }, loginOptions, (err, api) => {
             return;
         }
 
-        // ====== KIỂM TRA ADMIN GROUP ======
-        const isSenderAdmin = await isAdmin(api, thread, sender);
-        if (!isSenderAdmin) {
-            api.sendMessage("❌ Lệnh này chỉ dành cho Admin group!", thread);
+        // ====== KIỂM TRA ADMIN ======
+        if (!BOT_ADMINS.includes(sender.toString())) {
+            api.sendMessage("❌ Lệnh này chỉ dành cho Admin bot!", thread);
             return;
         }
 
         // ====== LỆNH ADMIN ======
         if (msg === "/members") {
             api.getThreadInfo(thread, (err, info) => {
-                if (err) return api.sendMessage("❌ Lỗi", thread);
+                if (err) return api.sendMessage("❌ Lỗi lấy thông tin group", thread);
                 api.sendMessage(`👥 Số thành viên: ${info.participantIDs.length}`, thread);
             });
             return;
@@ -94,6 +79,7 @@ login({ appState }, loginOptions, (err, api) => {
 
         if (msg.startsWith("/kick ")) {
             const target = msg.replace("/kick ", "").trim();
+            if (!target) return api.sendMessage("⚠️ /kick [ID]", thread);
             api.removeUserFromGroup(target, thread)
                 .then(() => api.sendMessage(`✅ Đã đuổi thành viên.`, thread))
                 .catch(() => api.sendMessage("❌ Không thể đuổi. (Bot cần quyền admin group)", thread));
@@ -102,6 +88,7 @@ login({ appState }, loginOptions, (err, api) => {
 
         if (msg.startsWith("/ban ")) {
             const target = msg.replace("/ban ", "").trim();
+            if (!target) return api.sendMessage("⚠️ /ban [ID]", thread);
             api.banUser(target, thread)
                 .then(() => api.sendMessage(`✅ Đã ban thành viên.`, thread))
                 .catch(() => api.sendMessage("❌ Không thể ban.", thread));
@@ -110,6 +97,7 @@ login({ appState }, loginOptions, (err, api) => {
 
         if (msg.startsWith("/mute ")) {
             const target = msg.replace("/mute ", "").trim();
+            if (!target) return api.sendMessage("⚠️ /mute [ID]", thread);
             api.changeAdminStatus(thread, target, false)
                 .then(() => api.sendMessage(`🔇 Đã mute thành viên.`, thread))
                 .catch(() => api.sendMessage("❌ Không thể mute. (Bot cần quyền admin)", thread));
@@ -118,6 +106,7 @@ login({ appState }, loginOptions, (err, api) => {
 
         if (msg.startsWith("/unmute ")) {
             const target = msg.replace("/unmute ", "").trim();
+            if (!target) return api.sendMessage("⚠️ /unmute [ID]", thread);
             api.changeAdminStatus(thread, target, true)
                 .then(() => api.sendMessage(`🔊 Đã mở nói.`, thread))
                 .catch(() => api.sendMessage("❌ Không thể unmute.", thread));
@@ -126,6 +115,7 @@ login({ appState }, loginOptions, (err, api) => {
 
         if (msg.startsWith("/addadmin ")) {
             const target = msg.replace("/addadmin ", "").trim();
+            if (!target) return api.sendMessage("⚠️ /addadmin [ID]", thread);
             api.changeAdminStatus(thread, target, true)
                 .then(() => api.sendMessage(`✅ Đã thêm admin.`, thread))
                 .catch(() => api.sendMessage("❌ Không thể thêm admin.", thread));
@@ -134,6 +124,7 @@ login({ appState }, loginOptions, (err, api) => {
 
         if (msg.startsWith("/rmadmin ")) {
             const target = msg.replace("/rmadmin ", "").trim();
+            if (!target) return api.sendMessage("⚠️ /rmadmin [ID]", thread);
             api.changeAdminStatus(thread, target, false)
                 .then(() => api.sendMessage(`✅ Đã gỡ admin.`, thread))
                 .catch(() => api.sendMessage("❌ Không thể gỡ admin.", thread));

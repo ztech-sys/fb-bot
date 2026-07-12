@@ -3,121 +3,73 @@ const fs = require("fs");
 const { login } = require("dhoner-fca");
 const speakeasy = require("speakeasy");
 
-// ====== WEB SERVER ======
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get('/', (req, res) => {
-    console.log(`📡 Ping nhận lúc: ${new Date().toISOString()}`);
-    res.status(200).send('🤖 Bot is running!');
-});
-
-app.get('/health', (req, res) => {
-    res.status(200).json({
-        status: 'online',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        botId: global.botId || 'chưa login'
-    });
-});
+app.get('/', (req, res) => res.send('OK'));
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Web server đang chạy tại cổng ${PORT}`);
 });
 
-// ====== DELAY ======
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const randomDelay = () => Math.floor(Math.random() * 3000) + 1000;
 
-// ====== BIẾN MÔI TRƯỜNG ======
-const FB_EMAIL = process.env.FB_EMAIL || "your_email@gmail.com";
-const FB_PASSWORD = process.env.FB_PASSWORD || "your_password";
-const FB_2FA_SECRET = process.env.FB_2FA_SECRET || "KH4N5G7I9J2L4M6P8Q1R3T5U7W9X2Z4";
+const FB_EMAIL = process.env.FB_EMAIL;
+const FB_PASSWORD = process.env.FB_PASSWORD;
+const FB_2FA_SECRET = process.env.FB_2FA_SECRET;
 
-// ====== HÀM TẠO MÃ 2FA ======
 function generate2FACode() {
     try {
-        const code = speakeasy.totp({
-            secret: FB_2FA_SECRET,
-            encoding: 'base32',
-            step: 30,
-            digits: 6
-        });
-        console.log(`🔐 Mã 2FA: ${code}`);
-        return code;
-    } catch (error) {
-        console.error("❌ Lỗi tạo mã 2FA:", error);
-        return null;
-    }
+        return speakeasy.totp({ secret: FB_2FA_SECRET, encoding: 'base32', step: 30, digits: 6 });
+    } catch { return null; }
 }
 
-// ====== HÀM LẤY COOKIE MỚI ======
 async function refreshAppState() {
     return new Promise((resolve, reject) => {
         const code = generate2FACode();
-        if (!code) {
-            reject(new Error("Không tạo được mã 2FA"));
-            return;
-        }
+        if (!code) return reject(new Error("Không tạo được mã 2FA"));
 
-        const loginOptions = {
+        login({ email: FB_EMAIL, password: FB_PASSWORD, twoFactorCode: code }, {
             online: true,
             listenEvents: true,
             autoMarkRead: false,
             autoReconnect: true,
-            simulateTyping: false,
-            forceLogin: false
-        };
-
-        const credentials = {
-            email: FB_EMAIL,
-            password: FB_PASSWORD,
-            twoFactorCode: code
-        };
-
-        console.log("🔄 Đang đăng nhập để lấy cookie mới...");
-
-        login(credentials, loginOptions, (err, api) => {
-            if (err) {
-                console.error("❌ Lỗi đăng nhập:", err);
-                reject(err);
-                return;
-            }
-
+            simulateTyping: false
+        }, (err, api) => {
+            if (err) return reject(err);
             const newAppState = api.getAppState();
             fs.writeFileSync("appstate.json", JSON.stringify(newAppState, null, 2));
-            console.log("✅ Đã lưu cookie mới vào appstate.json");
+            console.log("✅ Đã lưu cookie mới");
             resolve(newAppState);
         });
     });
 }
 
-// ====== CODE BOT CHÍNH ======
 const messageCount = {};
 const userCooldown = {};
 
 async function isAdmin(api, threadID, userID) {
     try {
-        const threadInfo = await api.getThreadInfo(threadID);
-        return threadInfo.adminIDs.some(admin => admin.id === userID);
+        const info = await api.getThreadInfo(threadID);
+        return info.adminIDs.some(a => a.id === userID);
     } catch { return false; }
 }
 
 async function isBotAdmin(api, threadID) {
     try {
-        const threadInfo = await api.getThreadInfo(threadID);
-        const botID = api.getCurrentUserID();
-        return threadInfo.adminIDs.some(admin => admin.id === botID);
+        const info = await api.getThreadInfo(threadID);
+        return info.adminIDs.some(a => a.id === api.getCurrentUserID());
     } catch { return false; }
 }
 
 async function startBot() {
-    // ====== KIỂM TRA APPSTATE ======
     let appState = null;
     try {
         appState = JSON.parse(fs.readFileSync("appstate.json", "utf8"));
         console.log("🔑 Đã tìm thấy session cũ");
-    } catch (e) {
+    } catch {
         console.log("🔑 Chưa có session, sẽ tạo mới...");
     }
 
@@ -126,57 +78,35 @@ async function startBot() {
         listenEvents: true,
         autoMarkRead: false,
         autoReconnect: true,
-        simulateTyping: false,
-        forceLogin: false
+        simulateTyping: false
     };
 
-    // ====== LOGIN ======
     function doLogin(credentials) {
         login(credentials, loginOptions, async (err, api) => {
             if (err) {
-                console.error("❌ Lỗi đăng nhập:", err);
-                
-                if (err.message && (err.message.includes("userID") || err.message.includes("session"))) {
-                    console.log("🔄 Session hết hạn, đang lấy cookie mới...");
+                console.error("❌ Lỗi:", err);
+                if (err.message && err.message.includes("userID")) {
                     try {
-                        const newAppState = await refreshAppState();
-                        console.log("✅ Đã lấy cookie mới, khởi động lại bot...");
-                        setTimeout(() => startBot(), 3000);
-                    } catch (refreshError) {
-                        console.error("❌ Không thể refresh cookie:", refreshError);
-                    }
+                        await refreshAppState();
+                        setTimeout(startBot, 3000);
+                    } catch {}
                 }
                 return;
             }
 
             console.log("✅ Đăng nhập thành công! ID:", api.getCurrentUserID());
             global.botId = api.getCurrentUserID();
-
             fs.writeFileSync("appstate.json", JSON.stringify(api.getAppState()));
-            console.log("📁 Đã lưu session");
 
             api.listenMqtt(async (err, event) => {
-                if (err) {
-                    console.error("❌ Lỗi MQTT:", err);
-                    if (err.message && err.message.includes("1357001")) {
-                        console.log("🔄 Tài khoản bị chặn, thử lấy cookie mới...");
-                        try {
-                            await refreshAppState();
-                            setTimeout(() => startBot(), 5000);
-                        } catch (e) {
-                            console.error("❌ Không thể refresh:", e);
-                        }
-                    }
-                    return;
-                }
+                if (err) return console.error("❌ MQTT:", err);
 
                 // ====== WELCOME ======
                 if (event.type === "event" && event.logMessageType === "log:subscribe") {
                     await delay(3000);
                     const newMembers = event.logMessageData.addedParticipants || [];
                     for (const member of newMembers) {
-                        const name = member.fullName || "thành viên mới";
-                        api.sendMessage(`🎉 Chào mừng ${name} đã tham gia nhóm!`, event.threadID);
+                        api.sendMessage(`🎉 Chào mừng ${member.fullName || "thành viên mới"} đã tham gia nhóm!`, event.threadID);
                     }
                     return;
                 }
@@ -187,6 +117,7 @@ async function startBot() {
                 const sender = event.senderID;
                 const thread = event.threadID;
 
+                // ====== ĐẾM TIN NHẮN ======
                 messageCount[sender] = (messageCount[sender] || 0) + 1;
                 if (userCooldown[sender] && Date.now() - userCooldown[sender] < 5000) return;
                 userCooldown[sender] = Date.now();
@@ -202,26 +133,77 @@ async function startBot() {
                 // ====== KICK ======
                 if (msg.startsWith("/kick")) {
                     await delay(randomDelay());
-                    if (!isSenderAdmin) {
-                        api.sendMessage("⛔️ Bạn không có quyền!", thread);
-                        return;
-                    }
-                    if (!(await isBotAdmin(api, thread))) {
-                        api.sendMessage("🤖 Bot cần làm admin!", thread);
-                        return;
-                    }
-                    if (!event.mentions || Object.keys(event.mentions).length === 0) {
-                        api.sendMessage("⚠️ Cần tag người cần kick!", thread);
-                        return;
-                    }
+                    if (!isSenderAdmin) return api.sendMessage("⛔️ Không có quyền!", thread);
+                    if (!(await isBotAdmin(api, thread))) return api.sendMessage("🤖 Bot cần làm admin!", thread);
+                    if (!event.mentions || Object.keys(event.mentions).length === 0) return api.sendMessage("⚠️ Cần tag người cần kick!", thread);
+                    
                     const targetId = Object.keys(event.mentions)[0];
-                    if (await isAdmin(api, thread, targetId)) {
-                        api.sendMessage("❌ Không thể kick admin!", thread);
-                        return;
-                    }
+                    if (await isAdmin(api, thread, targetId)) return api.sendMessage("❌ Không thể kick admin!", thread);
+                    
                     api.removeUserFromGroup(targetId, thread)
                         .then(() => api.sendMessage("✅ Đã kick!", thread))
                         .catch(() => api.sendMessage("❌ Lỗi kick!", thread));
+                }
+
+                // ====== BAN ======
+                if (msg.startsWith("/ban")) {
+                    await delay(randomDelay());
+                    if (!isSenderAdmin) return api.sendMessage("⛔️ Không có quyền!", thread);
+                    if (!(await isBotAdmin(api, thread))) return api.sendMessage("🤖 Bot cần làm admin!", thread);
+                    if (!event.mentions || Object.keys(event.mentions).length === 0) return api.sendMessage("⚠️ Cần tag người cần ban!", thread);
+                    
+                    const targetId = Object.keys(event.mentions)[0];
+                    if (await isAdmin(api, thread, targetId)) return api.sendMessage("❌ Không thể ban admin!", thread);
+                    
+                    api.banUser(targetId, thread)
+                        .then(() => api.sendMessage("✅ Đã ban!", thread))
+                        .catch(() => api.sendMessage("❌ Lỗi ban!", thread));
+                }
+
+                // ====== INFO ======
+                if (msg.startsWith("/info")) {
+                    await delay(randomDelay());
+                    try {
+                        let targetId = sender;
+                        let name = "Bạn";
+                        
+                        if (event.mentions && Object.keys(event.mentions).length > 0) {
+                            targetId = Object.keys(event.mentions)[0];
+                            const userInfo = await api.getUserInfo(targetId);
+                            name = userInfo[targetId]?.name || "Người dùng";
+                        } else {
+                            const userInfo = await api.getUserInfo(sender);
+                            name = userInfo[sender]?.name || "Bạn";
+                        }
+                        
+                        const userCount = messageCount[targetId] || 0;
+                        const isAdminStatus = await isAdmin(api, thread, targetId);
+                        
+                        api.sendMessage(
+                            `👤 THÔNG TIN THÀNH VIÊN\n` +
+                            `📝 Tên: ${name}\n` +
+                            `🆔 ID: ${targetId}\n` +
+                            `👑 Admin: ${isAdminStatus ? '✅ Có' : '❌ Không'}\n` +
+                            `💬 Số tin nhắn: ${userCount}`,
+                            thread
+                        );
+                    } catch { api.sendMessage("❌ Lỗi lấy thông tin!", thread); }
+                }
+
+                // ====== STATS ======
+                if (msg === "/stats") {
+                    await delay(randomDelay());
+                    const count = messageCount[sender] || 0;
+                    const totalUsers = Object.keys(messageCount).length;
+                    const totalMessages = Object.values(messageCount).reduce((a, b) => a + b, 0);
+                    
+                    api.sendMessage(
+                        `📊 THỐNG KÊ\n` +
+                        `💬 Tin nhắn của bạn: ${count}\n` +
+                        `👥 Tổng người dùng: ${totalUsers}\n` +
+                        `📨 Tổng tin nhắn: ${totalMessages}`,
+                        thread
+                    );
                 }
 
                 // ====== MEMBERS ======
@@ -237,15 +219,42 @@ async function startBot() {
                     } catch { api.sendMessage("❌ Lỗi!", thread); }
                 }
 
+                // ====== SPAM DETECTION ======
+                const spamKeywords = ["địt mẹ", "fuck", "đm", "con mẹ mày", "địt con mẹ mày", "fuck you", "kick bố m đi"];
+                const isSpam = spamKeywords.some(keyword => msg.includes(keyword));
+
+                if (isSpam) {
+                    await delay(randomDelay());
+                    const isSenderAdmin = await isAdmin(api, thread, sender);
+                    if (!isSenderAdmin) {
+                        const botIsAdmin = await isBotAdmin(api, thread);
+                        if (!botIsAdmin) {
+                            api.sendMessage("🤖 Bot cần làm admin để xử lý spam!", thread);
+                        } else {
+                            api.sendMessage("🚫 Phát hiện spam! Bot đang xử lý...", thread);
+                            api.removeUserFromGroup(sender, thread)
+                                .then(() => api.sendMessage("✅ Đã đuổi thành viên spam!", thread))
+                                .catch(() => console.log("⚠️ Không thể đuổi spam"));
+                        }
+                    } else {
+                        api.sendMessage("⚠️ Admin spam! Bot không thể kick admin.", thread);
+                    }
+                }
+
                 // ====== HELP ======
                 if (msg === "/help") {
                     await delay(randomDelay());
                     api.sendMessage(
-                        "📋 LỆNH:\n" +
-                        "/ping - Kiểm tra bot\n" +
-                        "/kick @tên - Đuổi (Admin)\n" +
-                        "/members - Số thành viên\n" +
-                        "/help - Trợ giúp",
+                        "📋 DANH SÁCH LỆNH:\n\n" +
+                        "🔹 /ping - Kiểm tra bot\n" +
+                        "🔹 /info @tên - Xem thông tin thành viên\n" +
+                        "🔹 /stats - Xem thống kê tin nhắn\n" +
+                        "🔹 /members - Xem số lượng thành viên\n" +
+                        "🔹 /kick @tên - Đuổi thành viên (Admin)\n" +
+                        "🔹 /ban @tên - Cấm thành viên (Admin)\n" +
+                        "🔹 /help - Hiển thị trợ giúp\n\n" +
+                        "🎉 Bot tự động chào mừng thành viên mới!\n" +
+                        "🚫 Bot tự động kick thành viên khi phát hiện từ ngữ vi phạm.",
                         thread
                     );
                 }
@@ -253,20 +262,17 @@ async function startBot() {
         });
     }
 
-    // ====== BẮT ĐẦU LOGIN ======
     if (appState) {
         doLogin({ appState: appState });
     } else {
         try {
-            const newAppState = await refreshAppState();
-            console.log("✅ Đã tạo appstate mới!");
-            setTimeout(() => startBot(), 2000);
+            await refreshAppState();
+            setTimeout(startBot, 2000);
         } catch (error) {
             console.error("❌ Không thể tạo appstate:", error);
         }
     }
 }
 
-// ====== KHỞI ĐỘNG ======
 console.log("🚀 Khởi động bot...");
 startBot();

@@ -125,7 +125,7 @@ async function startBot() {
                     const newMembers = event.logMessageData.addedParticipants || [];
                     for (const member of newMembers) {
                         const id = member.userId;
-                        const name = member.fullName || "thành viên mới";
+                        const name = member.fullName || "abc";
                         
                         // Kiểm tra blacklist
                         if (blacklist[event.threadID] && blacklist[event.threadID].includes(id)) {

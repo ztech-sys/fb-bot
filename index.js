@@ -104,7 +104,7 @@ async function main() {
                 api.sendMessage("🏓 pong!", thread);
             }
 
-            // 2. Kick - chỉ admin mới được dùng - ĐÃ SỬA
+            // 2. Kick - chỉ admin mới được dùng
             if (msg.startsWith("/kick")) {
                 console.log(`📨 Nhận lệnh /kick từ ${sender} trong nhóm ${thread}`);
                 
@@ -226,10 +226,33 @@ async function main() {
                     "/ping - Kiểm tra bot còn sống\n" +
                     "/kick @tên - Đuổi thành viên (Chỉ admin)\n" +
                     "/ban @tên - Cấm thành viên (Chỉ admin)\n" +
+                    "/members - Xem số lượng thành viên trong nhóm\n" +
                     "/help - Hiển thị trợ giúp\n\n" +
                     "🤖 Bot tự động kick spam từ: " + spamKeywords.join(", "),
                     thread
                 );
+            }
+
+            // 6. Kiểm tra số lượng thành viên - ai cũng xem được
+            if (msg === "/members" || msg === "/thanhvien") {
+                try {
+                    const threadInfo = await api.getThreadInfo(thread);
+                    const memberCount = threadInfo.participantIDs.length;
+                    const adminCount = threadInfo.adminIDs.length;
+                    const groupName = threadInfo.name || "Không có tên";
+                    
+                    api.sendMessage(
+                        `👥 THÔNG TIN NHÓM\n` +
+                        `📝 Tên nhóm: ${groupName}\n` +
+                        `👤 Số thành viên: ${memberCount}\n` +
+                        `👑 Số admin: ${adminCount}\n` +
+                        `🆔 ID nhóm: ${thread}`,
+                        thread
+                    );
+                } catch (error) {
+                    console.error("❌ Lỗi lấy thông tin nhóm:", error);
+                    api.sendMessage("❌ Không thể lấy thông tin nhóm.", thread);
+                }
             }
         });
     });

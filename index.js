@@ -125,7 +125,7 @@ async function startBot() {
                     const newMembers = event.logMessageData.addedParticipants || [];
                     for (const member of newMembers) {
                         const id = member.userId;
-                        const name = member.fullName || "abc";
+                        const name = member.fullName || "thành viên mới";
                         
                         // Kiểm tra blacklist
                         if (blacklist[event.threadID] && blacklist[event.threadID].includes(id)) {
@@ -137,7 +137,7 @@ async function startBot() {
                             continue;
                         }
                         
-                        api.sendMessage(`🎉 Chào mừng ${name} đã tham gia nhóm!`, event.threadID);
+                        api.sendMessage(`🎉 Chào mừng ${name} đã tham gia nhóm!          gtuan dz`, event.threadID);
                     }
                     return;
                 }

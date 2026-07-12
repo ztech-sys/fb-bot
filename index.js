@@ -219,20 +219,19 @@ async function main() {
                 }
             }
 
-            // 5. Help - ai cũng xem được
-            if (msg === "/help") {
-                api.sendMessage(
-                    "📋 DANH SÁCH LỆNH:\n" +
-                    "/ping - Kiểm tra bot còn sống\n" +
-                    "/kick @tên - Đuổi thành viên (Chỉ admin)\n" +
-                    "/ban @tên - Cấm thành viên (Chỉ admin)\n" +
-                    "/members - Xem số lượng thành viên trong nhóm\n" +
-                    "/help - Hiển thị trợ giúp\n\n" +
-                    "🤖 Bot tự động kick spam từ: " + spamKeywords.join(", "),
-                    thread
-                );
-            }
-
+          // 5. Help - ai cũng xem được
+if (msg === "/help") {
+    api.sendMessage(
+        "📋 DANH SÁCH LỆNH:\n" +
+        "/ping - Kiểm tra bot còn sống\n" +
+        "/kick @tên - Đuổi thành viên (Chỉ admin)\n" +
+        "/ban @tên - Cấm thành viên (Chỉ admin)\n" +
+        "/members - Xem số lượng thành viên trong nhóm\n" +
+        "/help - Hiển thị trợ giúp\n\n" +
+        "🤖 Bot tự động kick thành viên khi phát hiện từ ngữ vi phạm.",
+        thread
+    );
+}
             // 6. Kiểm tra số lượng thành viên - ai cũng xem được
             if (msg === "/members" || msg === "/thanhvien") {
                 try {

@@ -20,6 +20,24 @@ const FB_EMAIL = process.env.FB_EMAIL;
 const FB_PASSWORD = process.env.FB_PASSWORD;
 const FB_2FA_SECRET = process.env.FB_2FA_SECRET;
 
+// ====== BLACKLIST ======
+const blacklistFile = "blacklist.json";
+
+function loadBlacklist() {
+    try {
+        return JSON.parse(fs.readFileSync(blacklistFile, "utf8"));
+    } catch {
+        return {};
+    }
+}
+
+function saveBlacklist(data) {
+    fs.writeFileSync(blacklistFile, JSON.stringify(data, null, 2));
+}
+
+let blacklist = loadBlacklist();
+
+// ====== 2FA ======
 function generate2FACode() {
     try {
         return speakeasy.totp({ secret: FB_2FA_SECRET, encoding: 'base32', step: 30, digits: 6 });
@@ -101,12 +119,25 @@ async function startBot() {
             api.listenMqtt(async (err, event) => {
                 if (err) return console.error("❌ MQTT:", err);
 
-                // ====== WELCOME ======
+                // ====== WELCOME + BLACKLIST CHECK ======
                 if (event.type === "event" && event.logMessageType === "log:subscribe") {
                     await delay(3000);
                     const newMembers = event.logMessageData.addedParticipants || [];
                     for (const member of newMembers) {
-                        api.sendMessage(`🎉 Chào mừng ${member.fullName || "thành viên mới"} đã tham gia nhóm!`, event.threadID);
+                        const id = member.userId;
+                        const name = member.fullName || "thành viên mới";
+                        
+                        // Kiểm tra blacklist
+                        if (blacklist[event.threadID] && blacklist[event.threadID].includes(id)) {
+                            await delay(1000);
+                            api.sendMessage(`🚫 ${name} đã bị ban, đang tự động kick...`, event.threadID);
+                            api.removeUserFromGroup(id, event.threadID)
+                                .then(() => console.log(`✅ Đã kick ${id} (blacklist)`))
+                                .catch(() => console.log(`⚠️ Không thể kick ${id}`));
+                            continue;
+                        }
+                        
+                        api.sendMessage(`🎉 Chào mừng ${name} đã tham gia nhóm!`, event.threadID);
                     }
                     return;
                 }
@@ -117,7 +148,6 @@ async function startBot() {
                 const sender = event.senderID;
                 const thread = event.threadID;
 
-                // ====== ĐẾM TIN NHẮN ======
                 messageCount[sender] = (messageCount[sender] || 0) + 1;
                 if (userCooldown[sender] && Date.now() - userCooldown[sender] < 5000) return;
                 userCooldown[sender] = Date.now();
@@ -145,19 +175,74 @@ async function startBot() {
                         .catch(() => api.sendMessage("❌ Lỗi kick!", thread));
                 }
 
-                // ====== BAN ======
+                // ====== BAN (Blacklist) ======
                 if (msg.startsWith("/ban")) {
                     await delay(randomDelay());
                     if (!isSenderAdmin) return api.sendMessage("⛔️ Không có quyền!", thread);
-                    if (!(await isBotAdmin(api, thread))) return api.sendMessage("🤖 Bot cần làm admin!", thread);
-                    if (!event.mentions || Object.keys(event.mentions).length === 0) return api.sendMessage("⚠️ Cần tag người cần ban!", thread);
+                    if (!event.mentions || Object.keys(event.mentions).length === 0) {
+                        return api.sendMessage("⚠️ Cần tag người cần ban! Ví dụ: /ban @tên", thread);
+                    }
                     
                     const targetId = Object.keys(event.mentions)[0];
-                    if (await isAdmin(api, thread, targetId)) return api.sendMessage("❌ Không thể ban admin!", thread);
+                    if (await isAdmin(api, thread, targetId)) {
+                        return api.sendMessage("❌ Không thể ban admin!", thread);
+                    }
                     
-                    api.banUser(targetId, thread)
-                        .then(() => api.sendMessage("✅ Đã ban!", thread))
-                        .catch(() => api.sendMessage("❌ Lỗi ban!", thread));
+                    // Thêm vào blacklist
+                    if (!blacklist[thread]) blacklist[thread] = [];
+                    if (!blacklist[thread].includes(targetId)) {
+                        blacklist[thread].push(targetId);
+                        saveBlacklist(blacklist);
+                        api.sendMessage(`✅ Đã ban thành viên!`, thread);
+                        
+                        // Kick luôn
+                        api.removeUserFromGroup(targetId, thread)
+                            .then(() => api.sendMessage(`✅ Đã đuổi thành viên khỏi nhóm.`, thread))
+                            .catch(() => api.sendMessage(`❌ Không thể kick!`, thread));
+                    } else {
+                        api.sendMessage(`⚠️ Thành viên này đã bị ban rồi!`, thread);
+                    }
+                }
+
+                // ====== UNBAN ======
+                if (msg.startsWith("/unban")) {
+                    await delay(randomDelay());
+                    if (!isSenderAdmin) return api.sendMessage("⛔️ Không có quyền!", thread);
+                    if (!event.mentions || Object.keys(event.mentions).length === 0) {
+                        return api.sendMessage("⚠️ Cần tag người cần gỡ ban! Ví dụ: /unban @tên", thread);
+                    }
+                    
+                    const targetId = Object.keys(event.mentions)[0];
+                    if (blacklist[thread] && blacklist[thread].includes(targetId)) {
+                        blacklist[thread] = blacklist[thread].filter(id => id !== targetId);
+                        saveBlacklist(blacklist);
+                        api.sendMessage(`✅ Đã gỡ ban cho thành viên!`, thread);
+                    } else {
+                        api.sendMessage(`⚠️ Thành viên này chưa bị ban!`, thread);
+                    }
+                }
+
+                // ====== BANLIST ======
+                if (msg === "/banlist") {
+                    await delay(randomDelay());
+                    if (!isSenderAdmin) return api.sendMessage("⛔️ Không có quyền!", thread);
+                    
+                    const list = blacklist[thread] || [];
+                    if (list.length === 0) {
+                        api.sendMessage("📋 Danh sách ban trống.", thread);
+                    } else {
+                        let text = "📋 DANH SÁCH BAN:\n\n";
+                        for (const id of list) {
+                            try {
+                                const info = await api.getUserInfo(id);
+                                const name = info[id]?.name || id;
+                                text += `🔹 ${name}\n`;
+                            } catch {
+                                text += `🔹 ${id}\n`;
+                            }
+                        }
+                        api.sendMessage(text, thread);
+                    }
                 }
 
                 // ====== INFO ======
@@ -178,12 +263,14 @@ async function startBot() {
                         
                         const userCount = messageCount[targetId] || 0;
                         const isAdminStatus = await isAdmin(api, thread, targetId);
+                        const isBanned = blacklist[thread] && blacklist[thread].includes(targetId);
                         
                         api.sendMessage(
                             `👤 THÔNG TIN THÀNH VIÊN\n` +
                             `📝 Tên: ${name}\n` +
                             `🆔 ID: ${targetId}\n` +
                             `👑 Admin: ${isAdminStatus ? '✅ Có' : '❌ Không'}\n` +
+                            `🚫 Bị ban: ${isBanned ? '✅ Có' : '❌ Không'}\n` +
                             `💬 Số tin nhắn: ${userCount}`,
                             thread
                         );
@@ -252,9 +339,12 @@ async function startBot() {
                         "🔹 /members - Xem số lượng thành viên\n" +
                         "🔹 /kick @tên - Đuổi thành viên (Admin)\n" +
                         "🔹 /ban @tên - Cấm thành viên (Admin)\n" +
+                        "🔹 /unban @tên - Gỡ cấm (Admin)\n" +
+                        "🔹 /banlist - Xem danh sách bị cấm (Admin)\n" +
                         "🔹 /help - Hiển thị trợ giúp\n\n" +
                         "🎉 Bot tự động chào mừng thành viên mới!\n" +
-                        "🚫 Bot tự động kick thành viên khi phát hiện từ ngữ vi phạm.",
+                        "🚫 Bot tự động kick thành viên khi phát hiện từ ngữ vi phạm.\n" +
+                        "🔒 Bot tự động kick người bị ban khi vào nhóm.",
                         thread
                     );
                 }

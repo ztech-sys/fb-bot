@@ -1,14 +1,41 @@
+const express = require('express');
 const fs = require("fs");
 const readline = require("readline");
 const { login } = require("dhoner-fca");
 
-// Tạo interface để nhập từ bàn phím
+// ====== WEB SERVER CHO CRON PING ======
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Endpoint để cron ping
+app.get('/', (req, res) => {
+    console.log(`📡 Ping nhận lúc: ${new Date().toISOString()}`);
+    res.status(200).send('🤖 Bot is running!');
+});
+
+// Endpoint health check
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'online',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        botId: global.botId || 'chưa login'
+    });
+});
+
+// Khởi động server TRƯỚC bot
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Web server đang chạy tại cổng ${PORT}`);
+    console.log(`🔗 Health check: https://your-app.onrender.com/health`);
+});
+// ====== KẾT THÚC WEB SERVER ======
+
+// ====== CODE BOT ======
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
 });
 
-// Hàm hỏi người dùng nhập email và password
 function askCredentials() {
     return new Promise((resolve) => {
         rl.question("📧 Nhập email Facebook: ", (email) => {
@@ -20,19 +47,16 @@ function askCredentials() {
     });
 }
 
-// Hàm kiểm tra admin có log chi tiết
 async function isAdmin(api, threadID, userID) {
     try {
         const threadInfo = await api.getThreadInfo(threadID);
-        const result = threadInfo.adminIDs.some(admin => admin.id === userID);
-        return result;
+        return threadInfo.adminIDs.some(admin => admin.id === userID);
     } catch (error) {
         console.error("❌ Lỗi kiểm tra admin:", error);
         return false;
     }
 }
 
-// Hàm kiểm tra bot có phải admin không
 async function isBotAdmin(api, threadID) {
     try {
         const threadInfo = await api.getThreadInfo(threadID);
@@ -45,7 +69,6 @@ async function isBotAdmin(api, threadID) {
 }
 
 async function main() {
-    // Kiểm tra xem đã có session chưa
     let appState = null;
     try {
         appState = JSON.parse(fs.readFileSync("appstate.json", "utf8"));
@@ -62,7 +85,6 @@ async function main() {
         simulateTyping: true
     };
 
-    // Nếu có session thì dùng session, nếu không thì hỏi email/password
     let credentials = {};
     if (appState) {
         credentials = { appState: appState };
@@ -79,12 +101,11 @@ async function main() {
         }
 
         console.log("✅ Đăng nhập thành công! User ID:", api.getCurrentUserID());
+        global.botId = api.getCurrentUserID();
 
-        // Lưu session cho lần sau
         fs.writeFileSync("appstate.json", JSON.stringify(api.getAppState()));
         console.log("📁 Đã lưu session vào appstate.json");
 
-        // Lắng nghe tin nhắn
         api.listenMqtt(async (err, event) => {
             if (err) return console.error("❌ Lỗi lắng nghe:", err);
 
@@ -94,17 +115,14 @@ async function main() {
             const sender = event.senderID;
             const thread = event.threadID;
 
-            // Kiểm tra admin cho các lệnh yêu cầu quyền admin
             const isSenderAdmin = await isAdmin(api, thread, sender);
 
-            // ====== LỆNH QUẢN TRỊ ======
-
-            // 1. Ping - ai cũng dùng được
+            // Ping
             if (msg === "/ping") {
                 api.sendMessage("🏓 pong!", thread);
             }
 
-            // 2. Kick - chỉ admin mới được dùng
+            // Kick
             if (msg.startsWith("/kick")) {
                 console.log(`📨 Nhận lệnh /kick từ ${sender} trong nhóm ${thread}`);
                 
@@ -114,7 +132,6 @@ async function main() {
                     return;
                 }
 
-                // Kiểm tra bot có phải admin không
                 const botIsAdmin = await isBotAdmin(api, thread);
                 console.log(`🤖 Bot admin status: ${botIsAdmin}`);
                 
@@ -123,7 +140,6 @@ async function main() {
                     return;
                 }
 
-                // Kiểm tra có tag người không
                 if (!event.mentions || Object.keys(event.mentions).length === 0) {
                     api.sendMessage("⚠️ Cần tag người cần kick. Ví dụ: /kick @tên", thread);
                     return;
@@ -132,7 +148,6 @@ async function main() {
                 const targetId = Object.keys(event.mentions)[0];
                 console.log(`🎯 Target ID: ${targetId}`);
                 
-                // Kiểm tra target có phải admin không
                 const isTargetAdmin = await isAdmin(api, thread, targetId);
                 console.log(`👑 Target admin status: ${isTargetAdmin}`);
                 
@@ -141,7 +156,6 @@ async function main() {
                     return;
                 }
 
-                // Thực hiện kick
                 console.log(`🚀 Đang kick user ${targetId}`);
                 api.removeUserFromGroup(targetId, thread)
                     .then(() => {
@@ -154,14 +168,13 @@ async function main() {
                     });
             }
 
-            // 3. Ban - chỉ admin mới được dùng
+            // Ban
             if (msg.startsWith("/ban")) {
                 if (!isSenderAdmin) {
                     api.sendMessage("⛔️ Bạn không có quyền sử dụng lệnh này! Chỉ admin mới có thể ban thành viên.", thread);
                     return;
                 }
 
-                // Kiểm tra bot có phải admin không
                 const botIsAdmin = await isBotAdmin(api, thread);
                 if (!botIsAdmin) {
                     api.sendMessage("🤖 Bot cần được thêm làm admin để ban thành viên!", thread);
@@ -175,7 +188,6 @@ async function main() {
 
                 const targetId = Object.keys(event.mentions)[0];
                 
-                // Kiểm tra target có phải admin không
                 const isTargetAdmin = await isAdmin(api, thread, targetId);
                 if (isTargetAdmin) {
                     api.sendMessage("❌ Không thể ban admin khác!", thread);
@@ -192,15 +204,13 @@ async function main() {
                     });
             }
 
-            // 4. Tự động phát hiện spam - chỉ kick nếu spammer không phải admin
+            // Tự động kick spam
             const spamKeywords = ["kick bố m đi", "noledaden", "matuy" , "địt mẹ", "fuck you", "fuck off", "đm", "địt", "fuck", "fuck u", "fuck ur mom", "fuck your mom", "fuck your mother", "fuck ur mother", "fuck your dad", "fuck ur dad", "fuck your father", "fuck ur father", "fuck your family", "fuck ur family", "fuck your sister", "fuck ur sister", "fuck your brother", "fuck ur brother", "fuck your cousin", "fuck ur cousin", "fuck your uncle", "fuck ur uncle", "fuck your aunt", "fuck ur aunt", "fuck your grandma", "fuck ur grandma", "fuck your grandpa", "fuck ur grandpa", "fuck your niece", "fuck ur niece", "fuck your nephew", "fuck ur nephew","con mẹ mày", "con mẹ m", "con mẹ m địt", "con mẹ m địt cmnr", "con mẹ m địt cmn", "con mẹ m địt cmnr", "con mẹ m địt cmn", "địt con mẹ mày", "địt con mẹ m", "địt con mẹ m địt", "địt con mẹ m địt cmnr", "địt con mẹ m địt cmn", "địt con mẹ m địt cmnr", "địt con mẹ m địt cmn","t địt chết mẹ mày", "t địt chết mẹ m", "t địt chết mẹ m địt", "t địt chết mẹ m địt cmnr", "t địt chết mẹ m địt cmn", "t địt chết mẹ m địt cmnr", "t địt chết mẹ m địt cmn","ăn bố mày đi","ăn cái con cụ mày đi","ăn cái con cụ mày đi","ăn cái con cụ mày đi cmnr","ăn cái con cụ mày đi cmn","ăn cái con cụ mày đi cmnr","ăn cái con cụ mày đi cmn","địt tổ m ccho rách"];
             const isSpam = spamKeywords.some(keyword => msg.includes(keyword));
 
             if (isSpam) {
-                // Kiểm tra người gửi spam có phải admin không
                 const isSenderAdmin = await isAdmin(api, thread, sender);
                 if (!isSenderAdmin) {
-                    // Kiểm tra bot có phải admin không
                     const botIsAdmin = await isBotAdmin(api, thread);
                     if (!botIsAdmin) {
                         api.sendMessage("🤖 Bot cần được thêm làm admin để xử lý spam!", thread);
@@ -219,20 +229,21 @@ async function main() {
                 }
             }
 
-          // 5. Help - ai cũng xem được
-if (msg === "/help") {
-    api.sendMessage(
-        "📋 DANH SÁCH LỆNH:\n" +
-        "/ping - Kiểm tra bot còn sống\n" +
-        "/kick @tên - Đuổi thành viên (Chỉ admin)\n" +
-        "/ban @tên - Cấm thành viên (Chỉ admin)\n" +
-        "/members - Xem số lượng thành viên trong nhóm\n" +
-        "/help - Hiển thị trợ giúp\n\n" +
-        "🤖 Bot tự động kick thành viên khi phát hiện từ ngữ vi phạm.",
-        thread
-    );
-}
-            // 6. Kiểm tra số lượng thành viên - ai cũng xem được
+            // Help
+            if (msg === "/help") {
+                api.sendMessage(
+                    "📋 DANH SÁCH LỆNH:\n" +
+                    "/ping - Kiểm tra bot còn sống\n" +
+                    "/kick @tên - Đuổi thành viên (Chỉ admin)\n" +
+                    "/ban @tên - Cấm thành viên (Chỉ admin)\n" +
+                    "/members - Xem số lượng thành viên trong nhóm\n" +
+                    "/help - Hiển thị trợ giúp\n\n" +
+                    "🤖 Bot tự động kick thành viên khi phát hiện từ ngữ vi phạm.",
+                    thread
+                );
+            }
+
+            // Members
             if (msg === "/members" || msg === "/thanhvien") {
                 try {
                     const threadInfo = await api.getThreadInfo(thread);
